@@ -1,2 +1,2 @@
-# Research-Paper-Assistant
-Research-Paper Assistant (RAG for literature review)
+# Research-Paper Assistant
+
