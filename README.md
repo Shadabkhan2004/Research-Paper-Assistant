@@ -18,3 +18,8 @@ A **Retrieval-Augmented Generation (RAG)** tool to assist researchers in literat
 - **PDF Processing:** PyMuPDF
 - **Environment Management:** python-dotenv for API keys
 
+## Web Page Screenshot
+
+![Web Page Screenshot](./images/research-assistant.png)
+
+---
