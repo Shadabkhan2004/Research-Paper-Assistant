@@ -2,7 +2,9 @@ import { useState } from "react";
 import axios from "axios";
 import { FiUpload, FiSend, FiFileText } from "react-icons/fi";
 
-const API_BASE_URL = "https://research-paper-assistant-backend.onrender.com";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:8000";
 
 function App() {
   const [file, setFile] = useState(null);

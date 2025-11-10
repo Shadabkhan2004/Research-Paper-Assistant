@@ -1,20 +1,23 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings
+import tempfile
+import os, shutil
+import uuid
+
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain.schema import Document
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainFilter
-from pydantic import BaseModel
+from langchain.schema.runnable import RunnablePassthrough
+from langchain.schema.output_parser import StrOutputParser
 
-from utils import extract_text_from_pdf, clean_text, filter_docs, chunk_documents, format_docs
+from pydantic import BaseModel
 from dotenv import load_dotenv
-import os,shutil
+from utils import extract_text_from_pdf, clean_text, filter_docs, chunk_documents, format_docs
 
 load_dotenv()
-
 
 app = FastAPI()
 
@@ -28,24 +31,19 @@ app.add_middleware(
 
 OPENAI_MODEL = "gpt-4"
 EMBEDDING_MODEL = "text-embedding-3-small"
-VECTOR_DIR = "/tmp/vector_store"
-
+VECTOR_DIR = os.path.join(tempfile.gettempdir(), "vector_store")
+LATEST_VECTOR_STORE: str | None = None
 
 def init_vector_store(docs):
     embedding = OpenAIEmbeddings(model=EMBEDDING_MODEL)
-    if os.path.exists(VECTOR_DIR):
-        shutil.rmtree(VECTOR_DIR)
-    vector_store = Chroma.from_documents(
-        documents=docs,
-        embedding=embedding,
-        persist_directory=VECTOR_DIR
-    )
+    vector_dir = os.path.join(tempfile.gettempdir(),f"vector_store_{uuid.uuid4()}")
     
-    return vector_store
+    vector_store = Chroma.from_documents(documents=docs, embedding=embedding, persist_directory=vector_dir)
+    vector_store.persist()
 
+    return vector_store,vector_dir
 
-llm = ChatOpenAI(model=OPENAI_MODEL,temperature=0)
-
+llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0)
 
 prompt_template = ChatPromptTemplate.from_template("""
 Use the context below to answer the question.
@@ -57,57 +55,49 @@ Context:
 Question: {question}
 """)
 
+class QuestionRequest(BaseModel):
+    query: str
+
+
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
-  try:
-    file_path = os.path.join("/tmp", file.filename)
-
-    with open(file_path,"wb") as f:
-      f.write(await file.read())
-  
+    global LATEST_VECTOR_STORE
+    file_path = f"./{file.filename}"
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    
     docs = extract_text_from_pdf(file_path)
     docs = [Document(page_content=clean_text(d.page_content), metadata=d.metadata) for d in docs]
     docs = filter_docs(docs)
     chunks = chunk_documents(docs)
-
-    vector_store = init_vector_store(chunks)
+    
+    vector_store,vector_dir = init_vector_store(chunks)
+    LATEST_VECTOR_STORE = vector_dir
 
     compressor = LLMChainFilter.from_llm(llm)
-    compression_retriever = ContextualCompressionRetriever(
-      base_compressor=compressor,
-      base_retriever=vector_store.as_retriever(search_kwargs={"k":3})
-    )
-
+    compression_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=vector_store.as_retriever(search_kwargs={"k":3}))
+    
     return {"message": f"PDF uploaded and vector store created with {len(chunks)} chunks."}
-  
-  except Exception as e:
-    return {"error": str(e)}
-
-class QuestionRequest(BaseModel):
-    query: str
 
 @app.post("/ask-question/")
 async def ask_question(request: QuestionRequest):
-  query = request.query
-  if not os.path.exists(VECTOR_DIR):
-    return {"error":"No PDF Uploaded yet."}
-  
-  vector_store = Chroma(persist_directory=VECTOR_DIR, embedding_function=OpenAIEmbeddings(model=EMBEDDING_MODEL))
-  retriever = vector_store.as_retriever(search_kwargs={"k":3})
-  compressor = LLMChainFilter.from_llm(llm)
-  compression_retriever = ContextualCompressionRetriever(
-    base_compressor=compressor,
-    base_retriever=retriever
-  )
+    query = request.query
 
-  docs_text = format_docs(await compression_retriever.invoke(query))
-  prompt = prompt_template.format(context=docs_text, question=query)
-  answer_obj = llm.invoke(prompt)
+    if not LATEST_VECTOR_STORE or not os.path.exists(LATEST_VECTOR_STORE):
+        return {"error": "No PDF uploaded yet."}
 
-  if hasattr(answer_obj, "content"):
-    answer_text = answer_obj.content
-  else:
-    answer_text = str(answer_obj)
+    vector_store = Chroma(persist_directory=LATEST_VECTOR_STORE, embedding_function=OpenAIEmbeddings(model=EMBEDDING_MODEL))
 
-  return {"answer": answer_text}
-  
+    retriever = vector_store.as_retriever(search_kwargs={"k":3})
+    compressor = LLMChainFilter.from_llm(llm)
+    compression_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=retriever)
+    
+    rag_chain = (
+        {"context": compression_retriever | RunnablePassthrough(), "question": RunnablePassthrough()}
+        | prompt_template
+        | llm
+        | StrOutputParser()
+    )
+    
+    answer = rag_chain.invoke(query)
+    return {"answer": answer}
