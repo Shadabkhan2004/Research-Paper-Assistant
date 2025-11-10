@@ -2,6 +2,8 @@ import { useState } from "react";
 import axios from "axios";
 import { FiUpload, FiSend, FiFileText } from "react-icons/fi";
 
+const API_BASE_URL = "https://research-paper-assistant-backend.onrender.com";
+
 function App() {
   const [file, setFile] = useState(null);
   const [query, setQuery] = useState("");
@@ -15,7 +17,7 @@ function App() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await axios.post("http://localhost:8000/upload-pdf/", formData);
+      const res = await axios.post(`${API_BASE_URL}/upload-pdf/`, formData);
       alert(res.data.message);
     } catch (err) {
       alert("Failed to upload PDF.");
@@ -29,7 +31,7 @@ function App() {
     setLoading(true);
     setAnswer("");
     try {
-      const res = await axios.post("http://localhost:8000/ask-question/", { query });
+      const res = await axios.post(`${API_BASE_URL}/ask-question/`, { query });
       setAnswer(res.data.answer);
     } catch (err) {
       setAnswer("Failed to get answer. Check your backend.");
