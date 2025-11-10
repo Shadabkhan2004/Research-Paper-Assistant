@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.schema import Document
 from langchain.prompts import ChatPromptTemplate
@@ -28,16 +28,20 @@ app.add_middleware(
 
 OPENAI_MODEL = "gpt-4"
 EMBEDDING_MODEL = "text-embedding-3-small"
-VECTOR_DIR = "./vector_store"
+VECTOR_DIR = "/tmp/vector_store"
 
 
 def init_vector_store(docs):
-  embedding = OpenAIEmbeddings(model=EMBEDDING_MODEL)
-  if os.path.exists(VECTOR_DIR):
-    shutil.rmtree(VECTOR_DIR)
-  vector_store = Chroma.from_documents(documents=docs,embedding=embedding,persist_directory=VECTOR_DIR)
-  vector_store.persist()
-  return vector_store
+    embedding = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    if os.path.exists(VECTOR_DIR):
+        shutil.rmtree(VECTOR_DIR)
+    vector_store = Chroma.from_documents(
+        documents=docs,
+        embedding=embedding,
+        persist_directory=VECTOR_DIR
+    )
+    
+    return vector_store
 
 
 llm = ChatOpenAI(model=OPENAI_MODEL,temperature=0)
@@ -56,7 +60,8 @@ Question: {question}
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
   try:
-    file_path = f"./{file.filename}"
+    file_path = os.path.join("/tmp", file.filename)
+
     with open(file_path,"wb") as f:
       f.write(await file.read())
   
@@ -95,7 +100,7 @@ async def ask_question(request: QuestionRequest):
     base_retriever=retriever
   )
 
-  docs_text = format_docs(compression_retriever.get_relevant_documents(query))
+  docs_text = format_docs(await compression_retriever.invoke(query))
   prompt = prompt_template.format(context=docs_text, question=query)
   answer_obj = llm.invoke(prompt)
 
