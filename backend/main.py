@@ -55,24 +55,28 @@ Question: {question}
 
 @app.post("/upload-pdf/")
 async def upload_pdf(file: UploadFile = File(...)):
-  file_path = f"./{file.filename}"
-  with open(file_path,"wb") as f:
-    f.write(await file.read())
+  try:
+    file_path = f"./{file.filename}"
+    with open(file_path,"wb") as f:
+      f.write(await file.read())
   
-  docs = extract_text_from_pdf(file_path)
-  docs = [Document(page_content=clean_text(d.page_content), metadata=d.metadata) for d in docs]
-  docs = filter_docs(docs)
-  chunks = chunk_documents(docs)
+    docs = extract_text_from_pdf(file_path)
+    docs = [Document(page_content=clean_text(d.page_content), metadata=d.metadata) for d in docs]
+    docs = filter_docs(docs)
+    chunks = chunk_documents(docs)
 
-  vector_store = init_vector_store(chunks)
+    vector_store = init_vector_store(chunks)
 
-  compressor = LLMChainFilter.from_llm(llm)
-  compression_retriever = ContextualCompressionRetriever(
-    base_compressor=compressor,
-    base_retriever=vector_store.as_retriever(search_kwargs={"k":3})
-  )
+    compressor = LLMChainFilter.from_llm(llm)
+    compression_retriever = ContextualCompressionRetriever(
+      base_compressor=compressor,
+      base_retriever=vector_store.as_retriever(search_kwargs={"k":3})
+    )
 
-  return {"message": f"PDF uploaded and vector store created with {len(chunks)} chunks."}
+    return {"message": f"PDF uploaded and vector store created with {len(chunks)} chunks."}
+  
+  except Exception as e:
+    return {"error": str(e)}
 
 class QuestionRequest(BaseModel):
     query: str

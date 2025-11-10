@@ -11,20 +11,34 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const uploadPDF = async () => {
-    if (!file) return alert("Select a PDF first!");
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await axios.post(`${API_BASE_URL}/upload-pdf/`, formData);
+const uploadPDF = async () => {
+  if (!file) return alert("Select a PDF first!");
+  setUploading(true);
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await axios.post(`${API_BASE_URL}/upload-pdf/`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    if (res.data.message) {
       alert(res.data.message);
-    } catch (err) {
-      alert("Failed to upload PDF.");
-    } finally {
-      setUploading(false);
+    } else if (res.data.error) {
+      alert(`Upload failed: ${res.data.error}`);
     }
-  };
+
+    setFile(null);
+    document.getElementById("fileUpload").value = "";
+  } catch (err) {
+    console.error(err);
+    alert(err.response?.data?.error || "Failed to upload PDF. Check backend logs.");
+  } finally {
+    setUploading(false);
+  }
+};
+
 
   const askQuestion = async () => {
     if (!query) return;
